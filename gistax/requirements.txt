@@ -1,0 +1,7 @@
+requests
+beautifulsoup4
+PyPDF2
+pymupdf
+python-docx
+tkinterdnd2
+pdfplumber
