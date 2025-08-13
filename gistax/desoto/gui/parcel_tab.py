@@ -119,7 +119,7 @@ class ParcelTab(ttk.Frame):
             "parcel_city_state_zip": f'{attr.get("CITY","")}, {attr.get("STATE","")} {attr.get("ZIP_CODE","")}',
             "parcel_legal_description": f'Lot {attr.get("LOT", "")}, {attr.get("SUBD_NAME", "")}',
         })
-
+        # Auto-update processing tab
         self.processing_tab.load_from_tabs()
 
     # ── Enter selects first result ──────────────────────────────

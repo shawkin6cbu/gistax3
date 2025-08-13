@@ -16,6 +16,7 @@ class SharedData:
         # Tax Info
         self.tax_2024_total = ""
         self.tax_2024_paid_status = ""
+        self.tax_2024_date_paid = ""
         self.tax_2025_estimated = ""
 
         # Title Chain Info
@@ -25,9 +26,7 @@ class SharedData:
         self.lender = ""
         self.borrower = ""
         self.loan_amount = ""
-        self.writer = ""
-        self.date = ""
-        self.notes = ""
+        # removed writer/date/notes
 
     def get_data(self, key):
         with self.lock:

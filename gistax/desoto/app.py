@@ -10,7 +10,7 @@ class App(TkinterDnD.Tk):
         super().__init__()
 
         self.title("DeSoto County Utility")
-        self.geometry("800x600") # Increased size for new tab
+        self.geometry("960x640") # Slightly wider for modern layout
         self.resizable(True, True)
 
         try:
@@ -19,10 +19,17 @@ class App(TkinterDnD.Tk):
         except Exception:
             pass
 
+        # Modern styling
         style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("TNotebook.Tab", padding=(12, 6))
-        style.configure("TButton", padding=(8, 3))
+        try:
+            style.theme_use("vista")
+        except Exception:
+            style.theme_use("clam")
+        style.configure("TNotebook.Tab", padding=(14, 8))
+        style.configure("TButton", padding=(10, 6))
+        style.configure("TLabel", padding=(2, 2))
+        style.configure("TLabelframe", padding=10)
+        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"))
         self.option_add("*Font", ("Segoe UI", 10))
 
         self.shared_data = SharedData()

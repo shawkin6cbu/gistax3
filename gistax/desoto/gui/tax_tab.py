@@ -71,10 +71,13 @@ class TaxTab(ttk.Frame):
                                 state="normal", width=20)
         paid_cmb.grid(row=8, column=1, sticky="w")
 
-        # ── Update button for 2024 data ─────────────────────────
-        ttk.Button(self, text="Update 2024 Tax Data",
-                  command=self.update_2024_data)\
-           .grid(row=9, column=1, sticky="w", pady=(10, 0))
+        # ── 2024 Date Paid ──────────────────────────────────────
+        lbl("Date Paid:", 9, 0)
+        self.date_paid_2024_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.date_paid_2024_var, width=18).grid(row=9, column=1, sticky="w")
+
+        # Auto-sync Processing tab when values change (no manual update button)
+        self._bind_autosave()
 
         # tidy grid columns
         self.columnconfigure(0, weight=0)
@@ -111,32 +114,28 @@ class TaxTab(ttk.Frame):
             self.shared_data.set_data("tax_2025_estimated", tax_amount)
             self.processing_tab.load_from_tabs()
 
-    # ── Update 2024 tax data ────────────────────────────────────
-    def update_2024_data(self):
-        """Update the 2024 tax data in shared data."""
-        tax_2024 = self.tax_2024_var.get().replace(",", "").strip()
-        paid_status = self.paid_2024_var.get()
-        
-        # Validate 2024 amount if provided
-        if tax_2024:
-            if not tax_2024.replace(".", "").isdigit():
-                messagebox.showerror("Input error", "Enter a valid numeric amount for 2024 taxes.")
-                return
-            
-            # Format the amount with commas
-            try:
-                amount = float(tax_2024)
-                formatted = f"{amount:,.2f}"
-                self.tax_2024_var.set(formatted)
-                tax_2024 = formatted
-            except ValueError:
-                pass
-        
-        # Update shared data
-        self.shared_data.set_data("tax_2024_total", tax_2024)
-        self.shared_data.set_data("tax_2024_paid_status", paid_status)
-        
-        # Refresh processing tab
-        self.processing_tab.load_from_tabs()
-        
-        messagebox.showinfo("Success", "2024 tax data updated successfully!")
+    # ── Auto-sync handlers ──────────────────────────────────────
+    def _bind_autosave(self):
+        # Bind variable traces to auto-update shared data and refresh Processing tab
+        def on_amount(*_):
+            value = (self.tax_2024_var.get() or "").strip()
+            self.shared_data.set_data("tax_2024_total", value)
+            self.processing_tab.load_from_tabs()
+        def on_status(*_):
+            value = (self.paid_2024_var.get() or "").strip()
+            self.shared_data.set_data("tax_2024_paid_status", value)
+            self.processing_tab.load_from_tabs()
+        def on_date_paid(*_):
+            value = (self.date_paid_2024_var.get() or "").strip()
+            self.shared_data.set_data("tax_2024_date_paid", value)
+            self.processing_tab.load_from_tabs()
+
+        # Use trace_add if available; fallback to trace
+        try:
+            self.tax_2024_var.trace_add('write', on_amount)  # type: ignore[attr-defined]
+            self.paid_2024_var.trace_add('write', on_status)  # type: ignore[attr-defined]
+            self.date_paid_2024_var.trace_add('write', on_date_paid)  # type: ignore[attr-defined]
+        except Exception:
+            self.tax_2024_var.trace('w', lambda *_: on_amount())
+            self.paid_2024_var.trace('w', lambda *_: on_status())
+            self.date_paid_2024_var.trace('w', lambda *_: on_date_paid())

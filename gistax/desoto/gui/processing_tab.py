@@ -41,28 +41,38 @@ class ProcessingTab(ttk.Frame):
         tax_frame.pack(fill="x", pady=(0, 10))
         self.tax_2024_total_var = tk.StringVar()
         self.tax_2024_paid_var = tk.StringVar()
+        self.tax_2024_date_paid_var = tk.StringVar()
         self.tax_2025_est_var = tk.StringVar()
         self._create_entry_row(tax_frame, "2024 Total:", self.tax_2024_total_var, 0)
-        self._create_entry_row(tax_frame, "2024 Status:", self.tax_2024_paid_var, 1)
+        self._create_entry_row(tax_frame, "Date Paid:", self.tax_2024_date_paid_var, 1)
         
-        # Add dropdown for paid status
+        # Paid status dropdown (moved to row 2)
+        self._create_entry_row(tax_frame, "2024 Status:", self.tax_2024_paid_var, 2)
         paid_frame = ttk.Frame(tax_frame)
-        paid_frame.grid(row=1, column=1, sticky="ew", pady=2)
-        self.paid_combo = ttk.Combobox(paid_frame, textvariable=self.tax_2024_paid_var, 
-                                       values=["PAID", "UNPAID", "PARTIAL"], 
-                                       state="normal", width=28)
+        paid_frame.grid(row=2, column=1, sticky="ew", pady=2)
+        self.paid_combo = ttk.Combobox(
+            paid_frame,
+            textvariable=self.tax_2024_paid_var,
+            values=["PAID", "UNPAID", "PARTIAL"],
+            state="normal",
+            width=28,
+        )
         self.paid_combo.pack(side="left")
         
-        self._create_entry_row(tax_frame, "2025 Estimated:", self.tax_2025_est_var, 2)
+        self._create_entry_row(tax_frame, "2025 Estimated:", self.tax_2025_est_var, 3)
 
         # --- Title Chain Document ---
-        doc_frame = ttk.LabelFrame(left_frame, text="Title Chain Document", padding=10)
+        doc_frame = ttk.LabelFrame(left_frame, text="Drag and drop extracted title chain PDF", padding=10)
         doc_frame.pack(fill="x", pady=(0, 10))
         self.title_doc_var = tk.StringVar()
         doc_row = ttk.Frame(doc_frame)
         doc_row.pack(fill="x")
-        ttk.Label(doc_row, text="Abstract File:").pack(side="left")
-        self.title_doc_entry = ttk.Entry(doc_row, textvariable=self.title_doc_var, width=40)
+        # Styled drop area
+        drop_style = ttk.Style()
+        drop_style.configure("DropArea.TEntry", relief="solid", borderwidth=1)
+
+        ttk.Label(doc_row, text="File:").pack(side="left")
+        self.title_doc_entry = ttk.Entry(doc_row, textvariable=self.title_doc_var, width=40, style="DropArea.TEntry")
         self.title_doc_entry.pack(side="left", fill="x", expand=True, padx=(6,6))
         ttk.Button(doc_row, text="Browse", command=self.browse_title_document).pack(side="left")
 
@@ -74,8 +84,16 @@ class ProcessingTab(ttk.Frame):
                 self.process_title_document()
         doc_frame.drop_target_register(DND_FILES)
         doc_frame.dnd_bind("<<Drop>>", _drop_on_doc)
-
-        ttk.Button(doc_frame, text="Process Document", command=self.process_title_document).pack(pady=(5,0))
+        
+        # Auto-process when file path is set via typing/paste/browse
+        def on_title_path_change(*_):
+            path = (self.title_doc_var.get() or "").strip()
+            if path and os.path.exists(path) and path.lower().endswith(('.pdf', '.docx')):
+                self.process_title_document()
+        try:
+            self.title_doc_var.trace_add('write', lambda *_: on_title_path_change())  # type: ignore[attr-defined]
+        except Exception:
+            self.title_doc_var.trace('w', lambda *_: on_title_path_change())
 
         # --- Title Chain Summary ---
         title_frame = ttk.LabelFrame(left_frame, text="Title Chain Summary", padding=10)
@@ -89,25 +107,11 @@ class ProcessingTab(ttk.Frame):
         doc_details_frame.pack(fill="x", pady=(0, 10))
         self.lender_var = tk.StringVar()
         self.borrower_var = tk.StringVar()
-        self.loan_amount_var = tk.StringVar()
-        self.writer_var = tk.StringVar()
-        self.date_var = tk.StringVar()
-        self.notes_var = tk.StringVar()
+        # removed loan amount, writer, date, notes per request
         self._create_entry_row(doc_details_frame, "Lender:", self.lender_var, 0)
         self._create_entry_row(doc_details_frame, "Borrower:", self.borrower_var, 1)
-        self._create_entry_row(doc_details_frame, "Loan Amount:", self.loan_amount_var, 2)
-        self._create_entry_row(doc_details_frame, "Writer:", self.writer_var, 3)
-        self._create_entry_row(doc_details_frame, "Date:", self.date_var, 4)
-        
-        # Add default values
-        self.writer_var.set("Collin Hawkins")
-        from datetime import datetime
-        self.date_var.set(datetime.now().strftime("%B %d, %Y"))
-        
-        # Notes as text widget
-        ttk.Label(doc_details_frame, text="Notes:").grid(row=5, column=0, sticky="ne", padx=(0, 5), pady=2)
-        self.notes_text = tk.Text(doc_details_frame, width=30, height=3)
-        self.notes_text.grid(row=5, column=1, sticky="ew", pady=2)
+        # No Loan Amount field
+
 
         # --- Document Generation ---
         doc_gen_frame = ttk.LabelFrame(right_frame, text="Document Generation", padding=10)
@@ -119,9 +123,7 @@ class ProcessingTab(ttk.Frame):
         self.progress = ttk.Progressbar(doc_gen_frame, mode="indeterminate")
         self.progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5,0))
 
-        # --- Load from Tabs Button ---
-        load_button = ttk.Button(self, text="Load From Tabs", command=self.load_from_tabs)
-        load_button.pack(side="bottom", pady=10)
+        # Auto-loading is handled by other tabs; no manual button needed
 
     def browse_title_document(self):
         path = filedialog.askopenfilename(
@@ -178,7 +180,7 @@ class ProcessingTab(ttk.Frame):
 
     def load_from_tabs(self):
         """Load data from other tabs into this tab."""
-        print("Loading data from tabs...")
+        # Auto-sync from SharedData
         self.pin_var.set(self.shared_data.get_data("parcel_pin") or "")
         self.address_var.set(self.shared_data.get_data("parcel_address") or "")
         self.owner_var.set(self.shared_data.get_data("parcel_owner") or "")
@@ -189,6 +191,7 @@ class ProcessingTab(ttk.Frame):
         tax_total = self.shared_data.get_data("tax_2024_total") or ""
         self.tax_2024_total_var.set(tax_total)
         self.tax_2024_paid_var.set(self.shared_data.get_data("tax_2024_paid_status") or "PAID")
+        self.tax_2024_date_paid_var.set(self.shared_data.get_data("tax_2024_date_paid") or "")
         self.tax_2025_est_var.set(self.shared_data.get_data("tax_2025_estimated") or "")
 
         # Title chain
@@ -274,8 +277,8 @@ class ProcessingTab(ttk.Frame):
         if not template_path:
             return False, "Template file 'td_tmplt2.docx' not found."
 
-        # Get notes from text widget
-        notes_text = self.notes_text.get("1.0", "end-1c")
+        # No notes field anymore
+        notes_text = ""
 
         # Process title document if not already done
         doc_path = (self.title_doc_var.get() or "").strip()
@@ -291,47 +294,71 @@ class ProcessingTab(ttk.Frame):
         doc = Document(template_path)
 
         # CRITICAL: Map UI fields to template placeholders correctly
-        placeholders = {
-            # Property placeholders
-            "{PARCEL}": self.pin_var.get(),
-            "{PROPSTRE}": self.address_var.get(),  # Property Street
-            "{SLRLAST}": self.owner_var.get(),     # Seller Last Name
-            "{CITY_STATE_ZIP}": self.city_var.get(),
-            "{LEGAL_DESC}": self.legal_desc_var.get(),
-            
-            # Tax placeholders
-            "{TAXAMT}": self.tax_2024_total_var.get(),  # 2024 Tax Amount
-            "{TAX_2024_PAID}": self.tax_2024_paid_var.get(),
-            "{TAX_2025_EST}": self.tax_2025_est_var.get(),
-            
-            # Document details placeholders
-            "{Lender}": self.lender_var.get(),
-            "{BYRLAST}": self.borrower_var.get(),  # Buyer Last Name
-            "{LOAN_AMOUNT}": self.loan_amount_var.get(),
-            "{WRITER}": self.writer_var.get(),
-            "{DATE}": self.date_var.get(),
-            "{NOTES}": notes_text,
+        values_map = {
+            "PARCEL": self.pin_var.get(),
+            "PROPSTRE": self.address_var.get(),
+            "SLRLAST": self.owner_var.get(),
+            "CITY_STATE_ZIP": self.city_var.get(),
+            "LEGAL_DESC": self.legal_desc_var.get(),
+            "TAXAMT": self.tax_2024_total_var.get(),
+            "TAXDAT": self.tax_2024_date_paid_var.get(),
+            "TAX_2025_EST": self.tax_2025_est_var.get(),
+            "Lender": self.lender_var.get(),
+            "BYRLAST": self.borrower_var.get(),
+            "LOAN_AMOUNT": "",
         }
 
-        # Replace placeholders in paragraphs
-        for paragraph in doc.paragraphs:
-            for placeholder, value in placeholders.items():
-                if placeholder in paragraph.text:
-                    # Preserve formatting while replacing
-                    for run in paragraph.runs:
-                        if placeholder in run.text:
-                            run.text = run.text.replace(placeholder, value or "")
+        # Build token variants: support both bare and braced placeholders, case-insensitive
+        token_variants = {}
+        for key, val in values_map.items():
+            token_variants[key] = {
+                f"{{{key}}}": val or "",
+                key: val or "",
+            }
 
-        # Replace placeholders in tables
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for paragraph in cell.paragraphs:
-                        for placeholder, value in placeholders.items():
-                            if placeholder in paragraph.text:
-                                for run in paragraph.runs:
-                                    if placeholder in run.text:
-                                        run.text = run.text.replace(placeholder, value or "")
+        # XML-level replacement: covers body, tables, headers/footers, and text boxes
+        def __ci_replace(text: str, needle: str, repl: str) -> str:
+            import re as _re
+            if not text or not needle:
+                return text
+            pattern = _re.compile(_re.escape(needle), _re.IGNORECASE)
+            return pattern.sub(repl, text)
+
+        def replace_in_element_texts(root_element):
+            try:
+                from docx.oxml.ns import qn
+            except Exception:
+                qn = None
+            # Fallback namespace map
+            nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            # Find all text nodes
+            try:
+                text_nodes = root_element.xpath('.//w:t', namespaces=nsmap)
+            except Exception:
+                text_nodes = []
+            for t in text_nodes:
+                try:
+                    original = t.text or ""
+                    new_text = original
+                    for variants in token_variants.values():
+                        for token, value in variants.items():
+                            new_text = __ci_replace(new_text, token, value)
+                    if new_text != original:
+                        t.text = new_text
+                except Exception:
+                    continue
+
+        # Replace in main document body
+        replace_in_element_texts(doc._element)
+
+        # Replace in headers/footers (all sections)
+        for section in doc.sections:
+            for hdr in [section.header, section.first_page_header, section.even_page_header]:
+                if hdr:
+                    replace_in_element_texts(hdr._element)
+            for ftr in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if ftr:
+                    replace_in_element_texts(ftr._element)
 
         # Fill Title Chain Table
         chain_deeds = self.shared_data.get_data("title_chain_results") or []
