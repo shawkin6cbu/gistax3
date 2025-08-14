@@ -7,9 +7,11 @@ from desoto.services.title_chain import (
     get_24_month_chain,
     process_title_document
 )
+from desoto.services.tax_document import process_tax_document  # New import
 import threading
 import os
 from docx import Document
+import re
 
 class ProcessingTab(ttk.Frame):
     def __init__(self, parent, shared_data):
@@ -61,6 +63,39 @@ class ProcessingTab(ttk.Frame):
         
         self._create_entry_row(tax_frame, "2025 Estimated:", self.tax_2025_est_var, 3)
 
+        # --- Tax Document Drop Zone (NEW) ---
+        tax_doc_frame = ttk.LabelFrame(tax_frame, text="Drag and drop tax document here", padding=5)
+        tax_doc_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        
+        self.tax_doc_var = tk.StringVar()
+        tax_doc_row = ttk.Frame(tax_doc_frame)
+        tax_doc_row.pack(fill="x")
+        
+        ttk.Label(tax_doc_row, text="Tax Doc:").pack(side="left")
+        self.tax_doc_entry = ttk.Entry(tax_doc_row, textvariable=self.tax_doc_var, width=30)
+        self.tax_doc_entry.pack(side="left", fill="x", expand=True, padx=(6,6))
+        ttk.Button(tax_doc_row, text="Browse", command=self.browse_tax_document).pack(side="left")
+        
+        # Drop handler for tax documents
+        def _drop_on_tax_doc(event):
+            path = event.data.strip('{}')
+            if path.lower().endswith(('.pdf', '.docx')):
+                self.tax_doc_var.set(path)
+                self.process_tax_document()
+        
+        tax_doc_frame.drop_target_register(DND_FILES)
+        tax_doc_frame.dnd_bind("<<Drop>>", _drop_on_tax_doc)
+        
+        # Auto-process when tax file path is set
+        def on_tax_path_change(*_):
+            path = (self.tax_doc_var.get() or "").strip()
+            if path and os.path.exists(path) and path.lower().endswith(('.pdf', '.docx')):
+                self.process_tax_document()
+        try:
+            self.tax_doc_var.trace_add('write', lambda *_: on_tax_path_change())
+        except Exception:
+            self.tax_doc_var.trace('w', lambda *_: on_tax_path_change())
+
         # --- Title Chain Document ---
         doc_frame = ttk.LabelFrame(left_frame, text="Drag and drop extracted title chain PDF", padding=10)
         doc_frame.pack(fill="x", pady=(0, 10))
@@ -91,7 +126,7 @@ class ProcessingTab(ttk.Frame):
             if path and os.path.exists(path) and path.lower().endswith(('.pdf', '.docx')):
                 self.process_title_document()
         try:
-            self.title_doc_var.trace_add('write', lambda *_: on_title_path_change())  # type: ignore[attr-defined]
+            self.title_doc_var.trace_add('write', lambda *_: on_title_path_change())
         except Exception:
             self.title_doc_var.trace('w', lambda *_: on_title_path_change())
 
@@ -107,11 +142,8 @@ class ProcessingTab(ttk.Frame):
         doc_details_frame.pack(fill="x", pady=(0, 10))
         self.lender_var = tk.StringVar()
         self.borrower_var = tk.StringVar()
-        # removed loan amount, writer, date, notes per request
         self._create_entry_row(doc_details_frame, "Lender:", self.lender_var, 0)
         self._create_entry_row(doc_details_frame, "Borrower:", self.borrower_var, 1)
-        # No Loan Amount field
-
 
         # --- Document Generation ---
         doc_gen_frame = ttk.LabelFrame(right_frame, text="Document Generation", padding=10)
@@ -123,7 +155,67 @@ class ProcessingTab(ttk.Frame):
         self.progress = ttk.Progressbar(doc_gen_frame, mode="indeterminate")
         self.progress.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(5,0))
 
-        # Auto-loading is handled by other tabs; no manual button needed
+    def browse_tax_document(self):
+        """Browse for tax document file."""
+        path = filedialog.askopenfilename(
+            title="Select Tax Document", 
+            filetypes=[("PDF files","*.pdf"), ("Word documents", "*.docx"), ("All files","*.*")]
+        )
+        if path:
+            self.tax_doc_var.set(path)
+
+    def process_tax_document(self):
+        """Process the tax document to extract 2024 tax information."""
+        file_path = self.tax_doc_var.get().strip()
+        if not file_path or not os.path.exists(file_path):
+            return  # Silently return if no valid file
+        
+        # Show processing message
+        self.tax_2024_total_var.set("Processing...")
+        self.tax_2024_date_paid_var.set("Processing...")
+        
+        threading.Thread(target=self._process_tax_document_thread, args=(file_path,), daemon=True).start()
+
+    def _process_tax_document_thread(self, file_path):
+        """Thread worker for processing tax documents."""
+        try:
+            print(f"Processing tax document: {file_path}")
+            
+            success, msg, total_amount, date_paid = process_tax_document(file_path)
+            
+            if success:
+                # Update the fields with extracted data
+                self.after(0, lambda: self.tax_2024_total_var.set(total_amount or ""))
+                self.after(0, lambda: self.tax_2024_date_paid_var.set(date_paid or ""))
+                
+                # Set status to PAID if we found a date
+                if date_paid:
+                    self.after(0, lambda: self.tax_2024_paid_var.set("PAID"))
+                
+                # Update shared data
+                self.shared_data.update_data({
+                    "tax_2024_total": total_amount or "",
+                    "tax_2024_date_paid": date_paid or "",
+                    "tax_2024_paid_status": "PAID" if date_paid else self.tax_2024_paid_var.get()
+                })
+                
+                print(f"Tax extraction successful: Total={total_amount}, Date={date_paid}")
+                self.after(0, lambda: messagebox.showinfo("Success", f"Tax information extracted:\n2024 Total: ${total_amount}\nDate Paid: {date_paid}"))
+            else:
+                # Clear the processing message
+                self.after(0, lambda: self.tax_2024_total_var.set(""))
+                self.after(0, lambda: self.tax_2024_date_paid_var.set(""))
+                self.after(0, lambda: messagebox.showwarning("Processing Error", msg))
+                print(f"Tax extraction failed: {msg}")
+            
+        except Exception as e:
+            error_msg = f"Error processing tax document: {str(e)}"
+            print(f"Tax processing error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.after(0, lambda: self.tax_2024_total_var.set(""))
+            self.after(0, lambda: self.tax_2024_date_paid_var.set(""))
+            self.after(0, lambda: messagebox.showerror("Processing Error", error_msg))
 
     def browse_title_document(self):
         path = filedialog.askopenfilename(
@@ -220,110 +312,123 @@ class ProcessingTab(ttk.Frame):
         details_win.title("Manage Title Chain Entries")
         details_win.geometry("900x700")
 
-        # Use a paned window to make sections resizable
         paned_window = ttk.PanedWindow(details_win, orient=tk.VERTICAL)
         paned_window.pack(fill="both", expand=True, padx=10, pady=10)
+
+        cols = ("Date", "Grantor", "Grantee", "Instrument", "Book-Page")
+        col_map = {col: i for i, col in enumerate(cols)}
+
+        # --- Sorting Handler ---
+        sort_states = {'keep': {'col': 'Date', 'rev': True}, 'other': {'col': 'Date', 'rev': True}}
+
+        def parse_book_page(bp_str):
+            match = re.match(r'(\d+)-(\d+)', bp_str)
+            return [int(p) for p in match.groups()] if match else [0, 0]
+
+        def sort_tree(tree_key, col):
+            tree = keep_tree if tree_key == 'keep' else other_tree
+            state = sort_states[tree_key]
+
+            reverse = not state['rev'] if state['col'] == col else False
+            state['col'] = col
+            state['rev'] = reverse
+
+            items = [(tree.set(child, col), child) for child in tree.get_children('')]
+            
+            # Choose sorting key based on column
+            if col == 'Date':
+                from datetime import datetime
+                items.sort(key=lambda it: datetime.strptime(it[0], "%m/%d/%Y"), reverse=reverse)
+            elif col == 'Book-Page':
+                items.sort(key=lambda it: parse_book_page(it[0]), reverse=reverse)
+            else: # Alphabetical sort for other columns
+                items.sort(key=lambda it: it[0].lower(), reverse=reverse)
+
+            for index, (_, child) in enumerate(items):
+                tree.move(child, '', index)
+
+            # Update header arrows
+            for c in cols:
+                arrow = ' ↓' if reverse else ' ↑'
+                tree.heading(c, text=c + (arrow if c == col else ''))
+
 
         # --- Keep Section ---
         keep_frame = ttk.LabelFrame(paned_window, text="Keep", padding=10)
         paned_window.add(keep_frame, weight=1)
-
-        cols = ("Date", "Grantor", "Grantee", "Instrument", "Book-Page")
         keep_tree = ttk.Treeview(keep_frame, columns=cols, show="headings")
         for col in cols:
-            keep_tree.heading(col, text=col)
+            keep_tree.heading(col, text=col, command=lambda c=col: sort_tree('keep', c))
             keep_tree.column(col, width=150, anchor="w")
         keep_tree.pack(fill="both", expand=True)
 
         # --- Other Section ---
         other_frame = ttk.LabelFrame(paned_window, text="Other Entries", padding=10)
         paned_window.add(other_frame, weight=2)
-
         other_tree = ttk.Treeview(other_frame, columns=cols, show="headings")
         for col in cols:
-            other_tree.heading(col, text=col)
+            other_tree.heading(col, text=col, command=lambda c=col: sort_tree('other', c))
             other_tree.column(col, width=150, anchor="w")
         other_tree.pack(fill="both", expand=True)
 
         # --- Data Handling ---
-        # Create a dictionary for quick lookups of all entries by a unique key
         all_entries_map = {(e.date_string, e.book_page, e.instrument): e for e in all_entries}
-        
-        # Keep track of which items are in which tree
         kept_keys = set()
         other_keys = set()
 
         def populate_trees():
-            # Clear existing items
-            for item in keep_tree.get_children():
-                keep_tree.delete(item)
-            for item in other_tree.get_children():
-                other_tree.delete(item)
+            for item in keep_tree.get_children(): keep_tree.delete(item)
+            for item in other_tree.get_children(): other_tree.delete(item)
             
             kept_set = {(e.date_string, e.book_page, e.instrument) for e in kept_entries}
-            
-            # Sort all entries by date
             sorted_entries = sorted(all_entries, key=lambda e: e.date, reverse=True)
 
             for entry in sorted_entries:
                 key = (entry.date_string, entry.book_page, entry.instrument)
                 values = (entry.date_string, entry.grantor, entry.grantee, entry.instrument, entry.book_page)
                 if key in kept_set:
-                    keep_tree.insert("", "end", values=values, iid=f"kept_{len(kept_keys)}")
+                    keep_tree.insert("", "end", values=values)
                     kept_keys.add(key)
                 else:
-                    other_tree.insert("", "end", values=values, iid=f"other_{len(other_keys)}")
+                    other_tree.insert("", "end", values=values)
                     other_keys.add(key)
+            sort_tree('keep', 'Date')
+            sort_tree('other', 'Date')
+
 
         def move_to_other(event):
             selected_item = keep_tree.selection()
-            if not selected_item:
-                return
-            
+            if not selected_item: return
             item_values = keep_tree.item(selected_item, "values")
-            key = (item_values[0], item_values[4], item_values[3]) # date, book-page, instrument
-
+            key = (item_values[0], item_values[4], item_values[3])
             if key in kept_keys:
                 kept_keys.remove(key)
                 other_keys.add(key)
-                
-                other_tree.insert("", "end", values=item_values, iid=f"other_{len(other_keys)}")
+                other_tree.insert("", "end", values=item_values)
                 keep_tree.delete(selected_item)
 
         def move_to_keep(event):
             selected_item = other_tree.selection()
-            if not selected_item:
-                return
-
+            if not selected_item: return
             item_values = other_tree.item(selected_item, "values")
             key = (item_values[0], item_values[4], item_values[3])
-
             if key in other_keys:
                 other_keys.remove(key)
                 kept_keys.add(key)
-
-                keep_tree.insert("", "end", values=item_values, iid=f"kept_{len(kept_keys)}")
+                keep_tree.insert("", "end", values=item_values)
                 other_tree.delete(selected_item)
         
         keep_tree.bind("<Double-1>", move_to_other)
         other_tree.bind("<Double-1>", move_to_keep)
 
         def on_close():
-            # When the window is closed, update the shared data
             new_kept_entries = [all_entries_map[key] for key in kept_keys if key in all_entries_map]
-            # Sort by date before saving
             new_kept_entries.sort(key=lambda e: e.date, reverse=True)
             self.shared_data.set_data("title_chain_kept", new_kept_entries)
-            
-            # Update the summary on the main tab
             self.title_summary_var.set(f"{len(new_kept_entries)} vesting deeds in chain.")
-            print(f"Updated kept deeds to {len(new_kept_entries)} entries.")
-            
             details_win.destroy()
 
         details_win.protocol("WM_DELETE_WINDOW", on_close)
-        
-        # Initial population
         populate_trees()
 
     def browse_output(self):
