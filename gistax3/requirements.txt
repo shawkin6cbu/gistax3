@@ -7,3 +7,4 @@ tkinterdnd2
 pdfplumber
 docx-mailmerge
 lxml
+ttkbootstrap
